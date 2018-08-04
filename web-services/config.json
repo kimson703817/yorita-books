@@ -4,6 +4,7 @@
 		"host": "localhost",
 		"port": 9200,
 		"books_index": "books",
-		"completed_index": "completed"
+		"users_index": "users",
+      "user_dev": "yoshinon703"
 	}
 }
