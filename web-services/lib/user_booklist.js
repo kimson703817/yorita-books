@@ -25,13 +25,13 @@ module.exports = (app, es) => {
       Application Middleware Definitions
    *************************************************
    */
-   const getUserUrl = (req, res, next) => {
+   const getUserUrl = async(req, res, next) => {
       req.dbUrl.user = `${userUrl}/${req.params.id}`;
       req.dbOptions.user = {url: req.dbUrl.user, json: true};
       next();
    };
 
-   const getBookUrl = (req, res, next) => {
+   const getBookUrl = async(req, res, next) => {
       req.dbUrl.book = `${bookUrl}/${req.params.pgid}`;
       req.dbOptions.book = {url: req.dbUrl.book, json: true};
       next();
@@ -45,7 +45,7 @@ module.exports = (app, es) => {
          Object.freeze(req.dbResData);
          next();
       } catch (dbResErr) {
-         res.status(dbResErr.statusCode || 502).json(dbResErr.error);
+         res.status(dbResErr.statusCode).json(dbResErr.error);
       };
    };
 
@@ -61,16 +61,19 @@ module.exports = (app, es) => {
          Object.freeze(req.dbResData);
          next();
       } catch (dbResErr) {
-         res.status(dbResErr.statusCode || 502).json(dbResErr.error);
+         res.status(dbResErr.statusCode).json(dbResErr.error);
       };
    };
 
    // get the book's read status from query
    // if empty, default is 'READING'
-   const getReadStatus = (req, res, next) => {
+   const getReadStatus = async(req, res, next) => {
       if(req.query.status !== undefined) {
          let readStatus = ReadStatus[req.query.status.toUpperCase()];
-         if(readStatus === undefined) res.status(400).send('Invalid status!');
+         if(readStatus === undefined) {
+            res.status(400).json('Invalid status!');
+            return;
+         }
          req.queryData = {readStatus};
       } else {
          req.queryData.readStatus = ReadStatus['READING'];
@@ -79,7 +82,7 @@ module.exports = (app, es) => {
       next();
    }
 
-   const getBookUpdateIndex = (req, res, next) => {
+   const getBookUpdateIndex = async(req, res, next) => {
       // retrieve the index of interest
       req.book_index = req.dbResData.user.books
          .findIndex(bookToAdd => bookToAdd.id === req.params.pgid);
@@ -91,9 +94,11 @@ module.exports = (app, es) => {
       * add to list if not found
       * otherwise throw error
    */
-   const pushBooklistUpdate = (req, res, next) => {
-      if(req.book_index !== -1)
-         throw Error('Book is already in the user\'s list.');
+   const pushBooklistUpdate = async(req, res, next) => {
+      if(req.book_index !== -1) {
+         res.status(409).json('Book is already in the user\'s list.');
+         return;
+      }
       req.pendingUpdate = Object.freeze({
          id: req.params.pgid,
          title: req.dbResData.book.title,
@@ -103,9 +108,16 @@ module.exports = (app, es) => {
       next();
    }
 
-   const pushReadStatusUpdate = (req, res, next) => {
-      if(req.book_index === -1)
-         throw Error('Book is not in the user\'s list.');
+   const pushReadStatusUpdate = async(req, res, next) => {
+      if(req.book_index === -1) {
+         res.status(404).json('Book is not in the user\'s list.');
+         return;
+      }
+      if(req.dbResData.user.books[req.book_index].status
+         === req.queryData.readStatus) {
+         res.status(409).json('Read status already set to this value');
+         return;
+      }
       req.pendingUpdate = Object.freeze({
          id: req.params.pgid,
          title: req.dbResData.user.books[req.book_index].title,
@@ -115,9 +127,11 @@ module.exports = (app, es) => {
       next();
    }
 
-   const pushBookDelete = (req, res, next) => {
-      if(req.book_index === -1)
-         throw Error('Book to be deleted is not in the user\'s list');
+   const pushBookDelete = async(req, res, next) => {
+      if(req.book_index === -1) {
+         res.status(404).json('Book to be deleted is not in the user\'s list');
+         return;
+      }
       req.dbResData.user.books.splice(req.book_index, 1);
       next();
    }
@@ -147,13 +161,13 @@ module.exports = (app, es) => {
       * Initialize data objects
       * Initialize user url
    */
-   app.use('/api/user/:id', (req, res, next) => {
+   app.use('/api/user/:id', async(req, res, next) => {
       req.dbUrl = {};
       req.dbOptions = {};
       req.dbResData = {};
       req.queryData = {};
       next();
-   }, getUserUrl);
+   }, rejectHandler(getUserUrl));
 
    /*
       * Middleware stack for manipulating user's book list
@@ -169,9 +183,9 @@ module.exports = (app, es) => {
    */
    app.put('/api/user/:id/book/:pgid',
       rejectHandler(requestDbData),
-      getReadStatus,
-      getBookUpdateIndex,
-      pushBooklistUpdate,
+      rejectHandler(getReadStatus),
+      rejectHandler(getBookUpdateIndex),
+      rejectHandler(pushBooklistUpdate),
       rejectHandler(updateUser)
    );
 
@@ -182,9 +196,9 @@ module.exports = (app, es) => {
    */
    app.put('/api/user/:id/bookstatus/:pgid',
       rejectHandler(requestUserData),
-      getReadStatus,
-      getBookUpdateIndex,
-      pushReadStatusUpdate,
+      rejectHandler(getReadStatus),
+      rejectHandler(getBookUpdateIndex),
+      rejectHandler(pushReadStatusUpdate),
       rejectHandler(updateUser)
    );
 
@@ -194,8 +208,8 @@ module.exports = (app, es) => {
    */
    app.delete('/api/user/:id/book/:pgid',
       rejectHandler(requestUserData),
-      getBookUpdateIndex,
-      pushBookDelete,
+      rejectHandler(getBookUpdateIndex),
+      rejectHandler(pushBookDelete),
       rejectHandler(updateUser)
    );
 }
